@@ -248,8 +248,8 @@
 const ROSTER_URL =
   'https://raw.githubusercontent.com/MCOAJoyceMartin/MissedShiftsTracker/main/roster.csv';
 
-// Cloudflare Worker URL — set once in Setup, stored in localStorage
-let WORKER_URL = localStorage.getItem('purehealth_worker_url') || '';
+// Cloudflare Worker URL — hardcoded, no prompt needed
+const WORKER_URL = 'https://missed-shifts-tracker.joyce-969.workers.dev';
 
 // ═══════════════════════════════════════════════════════
 // FACILITY MAP
@@ -610,16 +610,7 @@ function saveDraft(){
 // SAVE TO GOOGLE SHEET
 // ═══════════════════════════════════════════════════════
 async function saveToSheet(){
-  const url = WORKER_URL || localStorage.getItem('purehealth_worker_url') || '';
-  if(!url){
-    // Prompt for worker URL inline
-    const entered = prompt(
-      'Enter your Cloudflare Worker URL:\n(e.g. https://missed-shifts-tracker.joyce-969.workers.dev)'
-    );
-    if(!entered) return;
-    WORKER_URL = entered.trim().replace(/\/$/,'');
-    localStorage.setItem('purehealth_worker_url', WORKER_URL);
-  }
+  const url = WORKER_URL;
 
   const savedBy=document.getElementById('savedByInput').value.trim();
   if(!savedBy){showToast('⚠ Enter your name before saving.',true);return;}
@@ -648,7 +639,7 @@ async function saveToSheet(){
   btn.textContent='⏳ Saving…'; btn.disabled=true;
 
   try{
-    const res = await fetch(WORKER_URL,{
+    const res = await fetch(url,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(payload)
