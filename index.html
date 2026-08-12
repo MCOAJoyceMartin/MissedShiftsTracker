@@ -411,8 +411,23 @@ function parseAndApplyRoster(csvText){
     const code = vals[codeIdx]||'';
     if(!code) return null;
 
-    // Skip inactive if status column exists
+    // Skip inactive / terminated
     if(statIdx>=0 && vals[statIdx] && vals[statIdx].toLowerCase()==='terminated') return null;
+
+    // Skip excluded departments — these are not eligible for the CareCoins incentive
+    const deptDescVal = (vals[ddIdx]||'').trim().toLowerCase();
+    const EXCLUDED_DEPTS = [
+      'business development',
+      'case management',
+      'central supply',
+      'clinical administration',
+      'engineering/plant operations',
+      'environmental services',
+      'medical records',
+      'pp activities',
+      'activities director',
+    ];
+    if(EXCLUDED_DEPTS.some(ex => deptDescVal.includes(ex))) return null;
 
     const facRaw = vals[facIdx]||'';
     const shifts = saved[code]||{};
