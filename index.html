@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PureHealth — Missed Shifts Tracker</title>
+<style>
+  :root {
+    --navy:#1B2B4B; --navy-dark:#111D33; --teal:#00A99D; --teal-light:#E6F7F6;
+    --amber:#E8A020; --red:#C0392B; --red-light:#FDEDEB;
+    --green:#27AE60; --green-light:#EAF7EE;
+    --gray-50:#F7F8FA; --gray-100:#EAECF0; --gray-200:#D1D5DB;
+    --gray-400:#9CA3AF; --gray-600:#4A5568; --gray-800:#1F2937;
+    --font:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --radius:6px; --shadow:0 1px 3px rgba(0,0,0,.12); --shadow-md:0 4px 12px rgba(0,0,0,.10);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:var(--font);background:var(--gray-50);color:var(--gray-800);font-size:14px;min-height:100vh;}
+
+  /* HEADER */
+  .header{background:var(--navy);color:white;padding:0 24px;display:flex;align-items:center;justify-content:space-between;height:56px;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.3);}
+  .header-left{display:flex;align-items:center;gap:12px;}
+  .logo-mark{background:var(--teal);color:white;font-weight:700;font-size:13px;padding:4px 8px;border-radius:var(--radius);letter-spacing:.05em;}
+  .header-title{font-size:15px;font-weight:600;color:white;}
+  .header-meta{font-size:12px;color:rgba(255,255,255,.55);margin-top:1px;}
+  .header-right{display:flex;align-items:center;gap:8px;}
+  .btn{padding:7px 13px;border-radius:var(--radius);font-size:12px;font-weight:500;cursor:pointer;border:none;display:inline-flex;align-items:center;gap:5px;transition:opacity .15s,transform .1s;white-space:nowrap;font-family:var(--font);}
+  .btn:hover{opacity:.88;}.btn:active{transform:scale(.98);}
+  .btn-ghost{background:rgba(255,255,255,.12);color:white;}
+  .btn-amber{background:var(--amber);color:white;}
+
+  /* ROSTER STATUS BAR */
+  .roster-bar{background:#0F1E38;padding:5px 24px;display:flex;align-items:center;gap:12px;font-size:12px;color:rgba(255,255,255,.6);min-height:34px;}
+  .roster-bar label{color:rgba(255,255,255,.4);font-weight:700;text-transform:uppercase;font-size:10px;letter-spacing:.05em;white-space:nowrap;}
+  .savedby-input{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:var(--radius);padding:3px 9px;font-size:12px;font-family:var(--font);color:white;outline:none;min-width:150px;}
+  .savedby-input:focus{border-color:var(--teal);}
+  .roster-status-text{display:flex;align-items:center;gap:5px;font-size:11px;}
+  .rdot{width:6px;height:6px;border-radius:50%;background:var(--gray-400);flex-shrink:0;}
+  .rdot.ok{background:var(--green);}
+  .rdot.loading{background:var(--amber);animation:pulse 1s infinite;}
+  .rdot.err{background:var(--red);}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .sync-sep{color:rgba(255,255,255,.15);margin:0 4px;}
+  .sync-status{display:flex;align-items:center;gap:5px;font-size:11px;margin-left:auto;}
+  .sdot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+  .sdot.idle{background:var(--gray-400);}
+  .sdot.syncing{background:var(--amber);animation:pulse 1s infinite;}
+  .sdot.synced{background:var(--green);}
+  .sdot.error{background:var(--red);}
+  .reload-btn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:4px;color:rgba(255,255,255,.6);font-size:10px;padding:2px 7px;cursor:pointer;font-family:var(--font);}
+  .reload-btn:hover{background:rgba(255,255,255,.15);}
+
+  /* PAY PERIOD NAV */
+  .pp-nav{background:white;border-bottom:1px solid var(--gray-100);display:flex;align-items:center;position:sticky;top:90px;z-index:95;overflow-x:auto;min-height:46px;}
+  .pp-group-label{padding:0 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--gray-400);display:flex;align-items:center;border-right:1px solid var(--gray-100);white-space:nowrap;background:var(--gray-50);flex-shrink:0;height:46px;}
+  .pp-tab{padding:0 12px;font-size:11px;font-weight:500;cursor:pointer;border-bottom:2px solid transparent;color:var(--gray-600);background:none;border-top:none;border-left:none;border-right:none;font-family:var(--font);transition:all .12s;white-space:nowrap;height:46px;display:flex;align-items:center;flex-direction:column;justify-content:center;gap:1px;flex-shrink:0;}
+  .pp-tab:hover{color:var(--navy);background:var(--gray-50);}
+  .pp-tab.active{color:var(--navy);border-bottom-color:var(--teal);font-weight:700;background:var(--teal-light);}
+  .pp-tab-dates{font-size:9px;color:var(--gray-400);font-weight:400;}
+  .pp-tab.active .pp-tab-dates{color:var(--teal);}
+  .pp-month-div{width:1px;background:var(--gray-100);align-self:stretch;margin:6px 0;flex-shrink:0;}
+
+  /* PERIOD HERO */
+  .period-hero{background:linear-gradient(135deg,var(--navy) 0%,#243550 100%);padding:9px 24px;display:flex;align-items:center;gap:14px;border-bottom:1px solid rgba(255,255,255,.05);}
+  .period-hero-paydate{font-size:17px;font-weight:800;color:white;letter-spacing:-.02em;}
+  .period-hero-range{font-size:12px;color:rgba(255,255,255,.5);}
+  .period-hero-badge{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:var(--radius);padding:3px 9px;font-size:11px;color:rgba(255,255,255,.65);}
+  .period-nav-btns{margin-left:auto;display:flex;gap:7px;}
+  .period-nav-btn{background:rgba(255,255,255,.12);border:none;color:white;padding:5px 11px;border-radius:var(--radius);cursor:pointer;font-size:12px;font-family:var(--font);transition:background .12s;}
+  .period-nav-btn:hover{background:rgba(255,255,255,.22);}
+  .period-nav-btn:disabled{opacity:.3;cursor:default;}
+
+  /* STATS BAR */
+  .stats-bar{background:var(--navy-dark);color:white;padding:0 24px;display:flex;align-items:stretch;overflow-x:auto;}
+  .stat-pill{padding:7px 15px;border-right:1px solid rgba(255,255,255,.08);display:flex;flex-direction:column;gap:2px;min-width:95px;}
+  .stat-pill:last-child{border-right:none;}
+  .stat-label{font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:rgba(255,255,255,.4);}
+  .stat-value{font-size:17px;font-weight:700;line-height:1;}
+  .sv-teal{color:var(--teal);}.sv-red{color:#E74C3C;}.sv-green{color:#2ECC71;}
+  .stat-bar-sep{flex:1;}
+  .coins-pill{padding:7px 15px;display:flex;flex-direction:column;gap:2px;}
+  .coins-hl{font-size:13px;font-weight:700;color:var(--amber);}
+
+  /* TOOLBAR */
+  .toolbar{background:white;border-bottom:1px solid var(--gray-100);padding:6px 24px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:sticky;top:136px;z-index:90;}
+  .toolbar label{font-size:10px;font-weight:700;color:var(--gray-600);text-transform:uppercase;letter-spacing:.05em;}
+  .sw{position:relative;}
+  .sw select{appearance:none;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:5px 27px 5px 9px;font-size:12px;font-family:var(--font);color:var(--gray-800);cursor:pointer;min-width:135px;outline:none;}
+  .sw select:focus{border-color:var(--teal);}
+  .sw::after{content:'▾';position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--gray-400);pointer-events:none;}
+  .search-box{border:1px solid var(--gray-200);border-radius:var(--radius);padding:5px 9px;font-size:12px;font-family:var(--font);background:var(--gray-50);outline:none;min-width:175px;}
+  .search-box:focus{border-color:var(--teal);}
+  .toolbar-sep{flex:1;}
+
+  /* TABLE */
+  .table-container{margin:0 24px 24px;background:white;border:1px solid var(--gray-100);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);}
+  .table-header{padding:9px 13px;border-bottom:1px solid var(--gray-100);display:flex;align-items:center;justify-content:space-between;background:var(--gray-50);}
+  .table-header h2{font-size:11px;font-weight:700;color:var(--gray-600);text-transform:uppercase;letter-spacing:.05em;}
+  .record-count{font-size:11px;color:var(--gray-400);}
+  .scroll-wrap{overflow-x:auto;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead tr{background:var(--gray-50);border-bottom:1px solid var(--gray-200);}
+  thead th{padding:7px 10px;text-align:left;font-size:10px;font-weight:700;color:var(--gray-600);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;}
+  tbody tr{border-bottom:1px solid var(--gray-100);transition:background .08s;}
+  tbody tr:last-child{border-bottom:none;}
+  tbody tr:hover{background:var(--gray-50);}
+  tbody tr.dq-row{background:#FFF8F7;}
+  tbody tr.dq-row:hover{background:#FFF1EE;}
+  td{padding:6px 10px;vertical-align:middle;}
+  .col-name{position:sticky;left:0;background:inherit;z-index:5;min-width:185px;}
+  thead .col-name{background:var(--gray-50);}
+  tbody tr:hover .col-name{background:var(--gray-50);}
+  tbody tr.dq-row .col-name{background:#FFF8F7;}
+  tbody tr.dq-row:hover .col-name{background:#FFF1EE;}
+  .emp-name{font-weight:600;color:var(--navy);font-size:12px;}
+  .emp-code{font-size:10px;color:var(--gray-400);font-family:monospace;}
+  .dept-tag{display:inline-block;background:var(--gray-100);color:var(--gray-600);border-radius:3px;padding:1px 5px;font-size:10px;font-weight:600;}
+  .job-title{color:var(--gray-600);font-size:11px;margin-top:1px;}
+  .period-cell{text-align:center;min-width:130px;}
+  .period-select{appearance:none;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:4px 8px;font-size:11px;font-family:var(--font);cursor:pointer;width:100%;text-align:center;outline:none;transition:all .12s;}
+  .period-select.dq{background:var(--red-light);border-color:var(--red);color:var(--red);font-weight:600;}
+  .pp-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;min-width:38px;text-align:center;}
+  .pp-badge.yes{background:var(--green-light);color:var(--green);}
+  .pp-badge.no{background:var(--red-light);color:var(--red);}
+  .coins-earned{font-size:10px;color:var(--amber);font-weight:600;display:block;margin-top:2px;}
+
+  /* Loading / empty states */
+  .state-card{padding:48px;text-align:center;color:var(--gray-400);}
+  .state-card h3{font-size:14px;color:var(--gray-600);margin-bottom:6px;}
+  .state-card p{font-size:12px;line-height:1.6;}
+  .spinner{display:inline-block;width:28px;height:28px;border:3px solid var(--gray-200);border-top-color:var(--teal);border-radius:50%;animation:spin .7s linear infinite;margin-bottom:12px;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* Toast */
+  .toast{position:fixed;bottom:20px;right:20px;background:var(--navy);color:white;padding:10px 16px;border-radius:var(--radius);font-size:13px;z-index:300;transform:translateY(60px);opacity:0;transition:all .22s;box-shadow:var(--shadow-md);max-width:320px;}
+  .toast.show{transform:translateY(0);opacity:1;}
+  .toast.error{background:var(--red);}
+
+  @media(max-width:768px){
+    .header,.roster-bar,.stats-bar,.toolbar{padding-left:12px;padding-right:12px;}
+    .pp-nav{padding-left:0;}
+    .period-hero{padding:8px 12px;}
+    .table-container{margin-left:12px;margin-right:12px;}
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="header-left">
+    <span class="logo-mark">PURE</span>
+    <div>
+      <div class="header-title">Missed Shifts Tracker</div>
+      <div class="header-meta">CareCoins Incentive · Pay Period Cycle · Sept 2026+</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <button class="btn btn-ghost" onclick="exportDQ()">⬇ Export DQ</button>
+    <button class="btn btn-amber" onclick="saveToSheet()" id="saveBtn">☁ Save to Sheet</button>
+  </div>
+</header>
+
+<!-- ROSTER / SAVED-BY BAR -->
+<div class="roster-bar">
+  <div class="roster-status-text">
+    <span class="rdot" id="rosterDot"></span>
+    <span id="rosterLabel">Loading roster…</span>
+    <button class="reload-btn" onclick="loadRoster()" title="Refresh roster from GitHub">↺</button>
+  </div>
+  <span class="sync-sep">|</span>
+  <label>Your Name</label>
+  <input type="text" class="savedby-input" id="savedByInput" placeholder="Required to save to sheet">
+  <div class="sync-status">
+    <span class="sdot idle" id="syncDot"></span>
+    <span id="syncLabel">Not yet saved</span>
+  </div>
+</div>
+
+<!-- PAY PERIOD NAV -->
+<div class="pp-nav" id="ppNav"></div>
+
+<!-- PERIOD HERO -->
+<div class="period-hero">
+  <div>
+    <div class="period-hero-paydate" id="heroPayDate">Pay Date: —</div>
+    <div class="period-hero-range" id="heroPeriodRange">Period: —</div>
+  </div>
+  <div class="period-hero-badge" id="heroPPNum">Pay Period —</div>
+  <div class="period-nav-btns">
+    <button class="period-nav-btn" id="btnPrev" onclick="navPeriod(-1)">← Prev</button>
+    <button class="period-nav-btn" id="btnNext" onclick="navPeriod(1)">Next →</button>
+  </div>
+</div>
+
+<!-- STATS BAR -->
+<div class="stats-bar">
+  <div class="stat-pill"><span class="stat-label">Employees</span><span class="stat-value sv-teal" id="statTotal">—</span></div>
+  <div class="stat-pill"><span class="stat-label">Qualifying</span><span class="stat-value sv-green" id="statQ">—</span></div>
+  <div class="stat-pill"><span class="stat-label">Disqualified</span><span class="stat-value sv-red" id="statDQ">—</span></div>
+  <div class="stat-pill"><span class="stat-label">Shown</span><span class="stat-value" id="statShown">—</span></div>
+  <div class="stat-bar-sep"></div>
+  <div class="coins-pill"><span class="stat-label">Incentive / Period</span><span class="coins-hl">1,500 CareCoins · $50</span></div>
+</div>
+
+<!-- TOOLBAR -->
+<div class="toolbar">
+  <label>Facility</label>
+  <div class="sw"><select id="facilitySelect" onchange="applyFilters()"><option value="">All Facilities</option></select></div>
+  <label>Dept</label>
+  <div class="sw"><select id="deptSelect" onchange="applyFilters()"><option value="">All Departments</option></select></div>
+  <label>Status</label>
+  <div class="sw">
+    <select id="statusSelect" onchange="applyFilters()">
+      <option value="">All</option>
+      <option value="dq">Disqualified</option>
+      <option value="q">Qualifying</option>
+    </select>
+  </div>
+  <input type="text" class="search-box" id="searchBox" placeholder="Search name or code…" oninput="applyFilters()">
+</div>
+
+<!-- TABLE -->
+<div class="table-container">
+  <div class="table-header">
+    <h2 id="tableTitle">Loading…</h2>
+    <span class="record-count" id="recordCount"></span>
+  </div>
+  <div class="scroll-wrap">
+    <table><thead id="tableHead"></thead><tbody id="tableBody"></tbody></table>
+  </div>
+  <div id="tableState" class="state-card">
+    <div class="spinner"></div>
+    <h3>Loading employee roster…</h3>
+    <p>Fetching from GitHub. This only takes a moment.</p>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// CONFIG — update ROSTER_URL after uploading roster.csv to GitHub
+// ═══════════════════════════════════════════════════════
+const ROSTER_URL =
+  'https://raw.githubusercontent.com/MCOAJoyceMartin/HumanResources/main/roster.csv';
+
+// Cloudflare Worker URL — set once in Setup, stored in localStorage
+let WORKER_URL = localStorage.getItem('purehealth_worker_url') || '';
+
+// ═══════════════════════════════════════════════════════
+// FACILITY MAP
+// ═══════════════════════════════════════════════════════
+const FACILITY_MAP = {
+  'PH OPS OF ARLINGTON LLC':     'Arlington',
+  'PH OPS OF CONROE LLC':        'Brightpointe',
+  'PH OPS OF DALLAS LLC':        'Dallas',
+  'PH OPS OF LAS ESTANCIAS LLC': 'Las Estancias',
+  'PH OPS OF TEXAS CITY LLC':    'Shoal',
+  '369 ALBUQUERQUE OPS LLC':     'Princeton',
+  'DV OPS DENTON LLC':           'Denton Village',
+  'MM OPS ALBUQUERQUE LLC':      'Manzano',
+  'LFV OPS DENTON LLC':          'Lake Forest',
+};
+
+// ═══════════════════════════════════════════════════════
+// PAY PERIODS — biweekly, anchor 8/7/2026, Sept 2026+
+// ═══════════════════════════════════════════════════════
+function buildPayPeriods() {
+  const out=[], DAY=86400000;
+  const MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const fmt  = d=>(d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear();
+  const fmtS = d=>MO[d.getMonth()]+' '+d.getDate();
+  const fmtL = d=>MO[d.getMonth()]+' '+d.getDate()+', '+d.getFullYear();
+  let peMs=new Date(2026,7,1).getTime(), pdMs=new Date(2026,7,7).getTime();
+  const sep=new Date(2026,8,1).getTime();
+  for(let i=0;i<60;i++){
+    const pd=new Date(pdMs),pe=new Date(peMs),ps=new Date(peMs-13*DAY);
+    if(pdMs>=sep){
+      out.push({
+        id:'pp'+fmt(pd).replace(/\//g,'-'),
+        payDate:fmt(pd), payLabel:'Pay Date: '+fmtL(pd),
+        start:fmt(ps), end:fmt(pe),
+        rangeLabel:fmtS(ps)+' – '+fmtS(pe),
+        monthYear:MO[pd.getMonth()]+' '+pd.getFullYear(),
+        num:0
+      });
+    }
+    peMs+=14*DAY; pdMs+=14*DAY;
+    if(pd.getFullYear()>2028) break;
+  }
+  out.forEach((p,i)=>p.num=i+1);
+  return out;
+}
+const PAY_PERIODS = buildPayPeriods();
+let currentPPIdx = 0;
+
+// ═══════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════
+let roster = [];
+let filteredRoster = [];
+
+// ═══════════════════════════════════════════════════════
+// PAY PERIOD NAV
+// ═══════════════════════════════════════════════════════
+function buildPPNav() {
+  let html='', lastMY='';
+  PAY_PERIODS.forEach((pp,idx)=>{
+    if(pp.monthYear!==lastMY){
+      if(lastMY) html+='<div class="pp-month-div"></div>';
+      html+=`<span class="pp-group-label">${pp.monthYear}</span>`;
+      lastMY=pp.monthYear;
+    }
+    html+=`<button class="pp-tab${idx===0?' active':''}" id="pptab-${idx}" onclick="selectPeriod(${idx})">
+      <span>PP ${pp.num}</span>
+      <span class="pp-tab-dates">${pp.rangeLabel}</span>
+    </button>`;
+  });
+  document.getElementById('ppNav').innerHTML=html;
+}
+
+function selectPeriod(idx){
+  document.querySelectorAll('.pp-tab').forEach(t=>t.classList.remove('active'));
+  const tab=document.getElementById(`pptab-${idx}`);
+  if(tab){tab.classList.add('active');tab.scrollIntoView({inline:'nearest',behavior:'smooth'});}
+  currentPPIdx=idx;
+  updateHero();
+  applyFilters();
+  updateStats();
+  setSyncStatus('idle');
+}
+
+function navPeriod(dir){
+  const n=currentPPIdx+dir;
+  if(n>=0&&n<PAY_PERIODS.length) selectPeriod(n);
+}
+
+function updateHero(){
+  const pp=PAY_PERIODS[currentPPIdx];
+  document.getElementById('heroPayDate').textContent   = pp.payLabel;
+  document.getElementById('heroPeriodRange').textContent = 'Period: '+pp.start+' – '+pp.end;
+  document.getElementById('heroPPNum').textContent     = 'Pay Period '+pp.num+' of '+PAY_PERIODS.length;
+  document.getElementById('btnPrev').disabled = currentPPIdx===0;
+  document.getElementById('btnNext').disabled = currentPPIdx===PAY_PERIODS.length-1;
+}
+
+// ═══════════════════════════════════════════════════════
+// ROSTER — fetch CSV from GitHub
+// ═══════════════════════════════════════════════════════
+function setRosterStatus(state, msg){
+  const dot=document.getElementById('rosterDot');
+  const lbl=document.getElementById('rosterLabel');
+  dot.className='rdot '+state;
+  lbl.textContent=msg;
+}
+
+async function loadRoster(){
+  setRosterStatus('loading','Loading roster from GitHub…');
+  showTableState('loading','Loading employee roster…','Fetching from GitHub. This only takes a moment.');
+
+  try {
+    const res = await fetch(ROSTER_URL+'?t='+Date.now()); // cache-bust
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    parseAndApplyRoster(text);
+  } catch(err){
+    setRosterStatus('err','Roster load failed — check GitHub URL');
+    showTableState('error','Could not load roster',
+      `Failed to fetch from GitHub: ${err.message}. Check that roster.csv exists at the configured URL and the repository is public.`);
+    console.error('Roster load error:', err);
+  }
+}
+
+function parseAndApplyRoster(csvText){
+  const lines = csvText.trim().split('\n').filter(Boolean);
+  if(lines.length < 2){
+    setRosterStatus('err','roster.csv appears empty');
+    showTableState('error','Roster is empty','roster.csv has no data rows. Add employees and re-upload.');
+    return;
+  }
+
+  const headers = lines[0].split(',').map(h=>h.trim().replace(/^"|"$/g,''));
+  const codeIdx = headers.indexOf('Employee_Code');
+  const nameIdx = headers.indexOf('Employee_Name');
+  const facIdx  = headers.indexOf('Payroll_Profile_Desc');
+  const deptIdx = headers.indexOf('Department');
+  const ddIdx   = headers.indexOf('Department_Desc');
+  const titIdx  = headers.indexOf('Job_Title_LA_Desc');
+  const statIdx = headers.indexOf('Employee_Status');
+
+  if(codeIdx<0||nameIdx<0||facIdx<0){
+    setRosterStatus('err','roster.csv missing required columns');
+    showTableState('error','Invalid roster format',
+      'roster.csv must have columns: Employee_Code, Employee_Name, Payroll_Profile_Desc, Department, Department_Desc, Job_Title_LA_Desc');
+    return;
+  }
+
+  const saved = JSON.parse(localStorage.getItem('purehealth_shifts_v3')||'{}');
+
+  roster = lines.slice(1).map(line=>{
+    // Handle quoted fields with commas inside them
+    const vals = parseCSVLine(line);
+    const code = vals[codeIdx]||'';
+    if(!code) return null;
+
+    // Skip inactive if status column exists
+    if(statIdx>=0 && vals[statIdx] && vals[statIdx].toLowerCase()==='terminated') return null;
+
+    const facRaw = vals[facIdx]||'';
+    const shifts = saved[code]||{};
+    PAY_PERIODS.forEach(pp=>{ if(!shifts[pp.id]) shifts[pp.id]=''; });
+
+    return {
+      code,
+      name:     vals[nameIdx]||'',
+      facility: FACILITY_MAP[facRaw]||facRaw,
+      facilityRaw: facRaw,
+      dept:     vals[deptIdx]||'',
+      deptDesc: vals[ddIdx]||'',
+      title:    vals[titIdx]||'',
+      shifts
+    };
+  }).filter(Boolean);
+
+  setRosterStatus('ok', `${roster.length} employees loaded`);
+  hideTableState();
+  populateFilters();
+  applyFilters();
+  updateStats();
+  showToast(`✓ ${roster.length} employees loaded from GitHub`);
+}
+
+// Handles simple CSV lines (no multi-line quoted fields)
+function parseCSVLine(line){
+  const result=[], re=/("(?:[^"]|"")*"|[^,]*),?/g;
+  let m;
+  while((m=re.exec(line))!==null){
+    if(m.index===re.lastIndex) re.lastIndex++;
+    let v=m[1];
+    if(v.startsWith('"')&&v.endsWith('"')) v=v.slice(1,-1).replace(/""/g,'"');
+    result.push(v.trim());
+    if(re.lastIndex>=line.length) break;
+  }
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════
+// FILTERS
+// ═══════════════════════════════════════════════════════
+function populateFilters(){
+  const facs  = [...new Set(roster.map(r=>r.facility))].sort();
+  const depts = [...new Set(roster.map(r=>r.deptDesc))].sort();
+  document.getElementById('facilitySelect').innerHTML =
+    '<option value="">All Facilities</option>'+facs.map(f=>`<option>${f}</option>`).join('');
+  document.getElementById('deptSelect').innerHTML =
+    '<option value="">All Departments</option>'+depts.map(d=>`<option>${d}</option>`).join('');
+}
+
+function applyFilters(){
+  if(!roster.length) return;
+  const fac    = document.getElementById('facilitySelect').value;
+  const dept   = document.getElementById('deptSelect').value;
+  const status = document.getElementById('statusSelect').value;
+  const q      = document.getElementById('searchBox').value.trim().toLowerCase();
+  const ppId   = PAY_PERIODS[currentPPIdx].id;
+
+  filteredRoster = roster.filter(e=>{
+    if(fac    && e.facility!==fac)  return false;
+    if(dept   && e.deptDesc!==dept) return false;
+    if(q && !e.name.toLowerCase().includes(q) && !e.code.toLowerCase().includes(q)) return false;
+    if(status==='dq' && e.shifts[ppId]!=='dq') return false;
+    if(status==='q'  && e.shifts[ppId]==='dq') return false;
+    return true;
+  });
+  renderTable();
+  updateTitle();
+}
+
+// ═══════════════════════════════════════════════════════
+// RENDER TABLE
+// ═══════════════════════════════════════════════════════
+function renderTable(){
+  const ppId = PAY_PERIODS[currentPPIdx].id;
+  const head = document.getElementById('tableHead');
+  const body = document.getElementById('tableBody');
+
+  head.innerHTML=`<tr>
+    <th class="col-name">Employee</th>
+    <th>Facility</th><th>Department</th>
+    <th class="period-cell">Period Status</th>
+    <th style="text-align:center">CareCoins</th>
+  </tr>`;
+
+  if(!filteredRoster.length){
+    body.innerHTML='';
+    showTableState('empty','No employees match your filters','Try adjusting facility, department, or search terms.');
+    document.getElementById('recordCount').textContent='0 employees';
+    return;
+  }
+  hideTableState();
+  document.getElementById('recordCount').textContent =
+    `${filteredRoster.length} employee${filteredRoster.length!==1?'s':''}`;
+
+  body.innerHTML=filteredRoster.map(emp=>{
+    const dq  = emp.shifts[ppId]==='dq';
+    const val = emp.shifts[ppId]||'';
+    return `<tr class="${dq?'dq-row':''}" id="row-${emp.code}">
+      <td class="col-name">
+        <div class="emp-name">${emp.name}</div>
+        <div class="emp-code">${emp.code}</div>
+      </td>
+      <td>${emp.facility}</td>
+      <td><span class="dept-tag">${emp.dept}</span><div class="job-title">${emp.title}</div></td>
+      <td class="period-cell">
+        <select class="period-select ${val==='dq'?'dq':''}"
+          onchange="updateShift(this,'${emp.code}','${ppId}')">
+          <option value="" ${val===''?'selected':''}>— Clear —</option>
+          <option value="dq" ${val==='dq'?'selected':''}>Does not qualify</option>
+        </select>
+      </td>
+      <td style="text-align:center" id="coins-${emp.code}">
+        ${dq
+          ? '<span class="pp-badge no">DQ</span>'
+          : '<span class="pp-badge yes">Earns</span><span class="coins-earned">1,500 coins</span>'}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════
+// SHIFT UPDATE
+// ═══════════════════════════════════════════════════════
+function updateShift(el, code, ppId){
+  const val=el.value;
+  const emp=roster.find(e=>e.code===code);
+  if(!emp) return;
+  emp.shifts[ppId]=val;
+  el.className='period-select '+(val==='dq'?'dq':'');
+  document.getElementById(`row-${code}`).className=val==='dq'?'dq-row':'';
+  const coins=document.getElementById(`coins-${code}`);
+  if(coins) coins.innerHTML=val==='dq'
+    ?'<span class="pp-badge no">DQ</span>'
+    :'<span class="pp-badge yes">Earns</span><span class="coins-earned">1,500 coins</span>';
+  updateStats();
+  autosave();
+  setSyncStatus('idle');
+}
+
+function updateStats(){
+  const ppId=PAY_PERIODS[currentPPIdx].id;
+  const dqCnt=roster.filter(e=>e.shifts[ppId]==='dq').length;
+  document.getElementById('statTotal').textContent  = roster.length;
+  document.getElementById('statQ').textContent      = roster.length-dqCnt;
+  document.getElementById('statDQ').textContent     = dqCnt;
+  document.getElementById('statShown').textContent  = filteredRoster.length;
+}
+
+function updateTitle(){
+  const fac=document.getElementById('facilitySelect').value||'All Facilities';
+  const pp =PAY_PERIODS[currentPPIdx];
+  document.getElementById('tableTitle').textContent =
+    `${fac} · Pay Date ${pp.payDate} · ${pp.rangeLabel}`;
+}
+
+// ═══════════════════════════════════════════════════════
+// TABLE STATE HELPERS
+// ═══════════════════════════════════════════════════════
+function showTableState(type, title, body){
+  const el=document.getElementById('tableState');
+  el.style.display='block';
+  const icons={loading:'<div class="spinner"></div>',error:'⚠️',empty:'🔍'};
+  el.innerHTML=`${icons[type]||''}<h3>${title}</h3><p>${body}</p>`;
+}
+function hideTableState(){
+  document.getElementById('tableState').style.display='none';
+}
+
+// ═══════════════════════════════════════════════════════
+// LOCAL SAVE
+// ═══════════════════════════════════════════════════════
+function autosave(){
+  const data={};
+  roster.forEach(e=>{data[e.code]=e.shifts;});
+  localStorage.setItem('purehealth_shifts_v3',JSON.stringify(data));
+}
+
+// ═══════════════════════════════════════════════════════
+// SAVE TO GOOGLE SHEET
+// ═══════════════════════════════════════════════════════
+async function saveToSheet(){
+  const url = WORKER_URL || localStorage.getItem('purehealth_worker_url') || '';
+  if(!url){
+    // Prompt for worker URL inline
+    const entered = prompt(
+      'Enter your Cloudflare Worker URL:\n(e.g. https://missed-shifts-tracker.joyce-969.workers.dev)'
+    );
+    if(!entered) return;
+    WORKER_URL = entered.trim().replace(/\/$/,'');
+    localStorage.setItem('purehealth_worker_url', WORKER_URL);
+  }
+
+  const savedBy=document.getElementById('savedByInput').value.trim();
+  if(!savedBy){showToast('⚠ Enter your name before saving.',true);return;}
+
+  const pp  = PAY_PERIODS[currentPPIdx];
+  const fac = document.getElementById('facilitySelect').value||'All';
+
+  const payload={
+    action:'save',
+    payPeriodId: pp.id,
+    payDate:     pp.payDate,
+    periodStart: pp.start,
+    periodEnd:   pp.end,
+    facility:    fac,
+    savedBy,
+    timestamp:   new Date().toISOString(),
+    employees: roster.map(e=>({
+      code:e.code, name:e.name, facility:e.facility,
+      dept:e.deptDesc, title:e.title,
+      status:e.shifts[pp.id]||''
+    }))
+  };
+
+  setSyncStatus('syncing');
+  const btn=document.getElementById('saveBtn');
+  btn.textContent='⏳ Saving…'; btn.disabled=true;
+
+  try{
+    const res = await fetch(WORKER_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+    const json = await res.json();
+    if(json.success){
+      setSyncStatus('synced');
+      autosave();
+      showToast(`✓ Saved — ${json.logged} rows logged, ${json.disqualified} disqualified`);
+    } else {
+      throw new Error(json.error||'Apps Script returned an error');
+    }
+  } catch(err){
+    setSyncStatus('error');
+    showToast('✗ Save failed: '+err.message, true);
+    console.error(err);
+  } finally {
+    btn.textContent='☁ Save to Sheet'; btn.disabled=false;
+  }
+}
+
+function setSyncStatus(state){
+  const dot=document.getElementById('syncDot');
+  const lbl=document.getElementById('syncLabel');
+  const map={
+    idle:{cls:'sdot idle',text:'Unsaved changes'},
+    syncing:{cls:'sdot syncing',text:'Saving…'},
+    synced:{cls:'sdot synced',text:'Saved to Sheet ✓'},
+    error:{cls:'sdot error',text:'Save failed'},
+  };
+  const s=map[state]||map.idle;
+  dot.className=s.cls; lbl.textContent=s.text;
+}
+
+// ═══════════════════════════════════════════════════════
+// EXPORT DQ CSV
+// ═══════════════════════════════════════════════════════
+function exportDQ(){
+  const pp=PAY_PERIODS[currentPPIdx], ppId=pp.id;
+  const dqList=roster.filter(e=>e.shifts[ppId]==='dq');
+  if(!dqList.length){showToast('No disqualified employees for this pay period');return;}
+  const headers=['Employee_Code','Employee_Name','Facility','Department','Job_Title',
+                 'Pay_Date','Period_Start','Period_End','Status','CareCoins'];
+  const rows=dqList.map(e=>[
+    e.code,`"${e.name}"`,`"${e.facility}"`,`"${e.deptDesc}"`,`"${e.title}"`,
+    pp.payDate,pp.start,pp.end,'DOES NOT QUALIFY',0
+  ]);
+  const csv=[headers.join(','),...rows.map(r=>r.join(','))].join('\r\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download=`PureHealth_DQ_${pp.payDate.replace(/\//g,'-')}.csv`;
+  a.click();
+  showToast(`✓ Exported ${dqList.length} disqualified employees`);
+}
+
+// ═══════════════════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════════════════
+function showToast(msg,isError){
+  const t=document.getElementById('toast');
+  t.textContent=msg;
+  t.className='toast'+(isError?' error':'');
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),3500);
+}
+
+// ═══════════════════════════════════════════════════════
+// STARTUP
+// ═══════════════════════════════════════════════════════
+buildPPNav();
+updateHero();
+loadRoster();   // fetch from GitHub on every page load
+</script>
+</body>
+</html>
