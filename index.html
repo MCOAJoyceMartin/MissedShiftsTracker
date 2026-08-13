@@ -511,8 +511,8 @@ function parseAndApplyRoster(csvText){
     const code = vals[codeIdx]||'';
     if(!code) return null;
 
-    // Skip inactive / terminated
-    if(statIdx>=0 && vals[statIdx] && vals[statIdx].toLowerCase()==='terminated') return null;
+    // Only include Active employees — skip everyone else (Terminated, LOA, Inactive, etc.)
+    if(statIdx>=0 && (vals[statIdx]||'').trim().toLowerCase() !== 'active') return null;
 
     // Skip excluded departments — these are not eligible for the CareCoins incentive
     const deptDescVal = (vals[ddIdx]||'').trim().toLowerCase();
@@ -748,11 +748,13 @@ async function saveToSheet(){
     facility:    fac,
     savedBy,
     timestamp:   new Date().toISOString(),
-    employees: roster.map(e=>({
-      code:e.code, name:e.name, facility:e.facility,
-      dept:e.deptDesc, title:e.title,
-      status:e.shifts[pp.id]||''
-    }))
+    employees: roster
+      .filter(e => currentUser.facility === 'All' || e.facility === currentUser.facility)
+      .map(e=>({
+        code:e.code, name:e.name, facility:e.facility,
+        dept:e.deptDesc, title:e.title,
+        status:e.shifts[pp.id]||''
+      }))
   };
 
   setSyncStatus('syncing');
