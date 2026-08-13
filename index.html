@@ -232,6 +232,7 @@
   <div class="user-badge" id="userBadge">
     <div class="user-avatar" id="userAvatar">?</div>
     <span id="userNameLabel">Not signed in</span>
+    <span id="userFacilityLabel" style="color:var(--teal);font-weight:700;font-size:11px;"></span>
     <button class="logout-btn" onclick="doLogout()">Sign out</button>
   </div>
   <input type="hidden" id="savedByInput" value="">
@@ -963,6 +964,7 @@ function applyUserSession(user){
   const initials = user.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
   document.getElementById('userAvatar').textContent  = initials;
   document.getElementById('userNameLabel').textContent = user.name + (user.role==='admin' ? ' · Admin' : '');
+  document.getElementById('userFacilityLabel').textContent = user.facility !== 'All' ? '· ' + user.facility : '· All Facilities';
 
   // Lock facility filter if not admin
   const facSel = document.getElementById('facilitySelect');
