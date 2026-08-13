@@ -577,6 +577,9 @@ function populateFilters(){
     '<option value="">All Facilities</option>'+facs.map(f=>`<option>${f}</option>`).join('');
   document.getElementById('deptSelect').innerHTML =
     '<option value="">All Departments</option>'+depts.map(d=>`<option>${d}</option>`).join('');
+
+  // Re-apply facility lock now that options exist
+  if(currentUser) applyFacilityLock(currentUser);
 }
 
 function applyFilters(){
@@ -962,21 +965,31 @@ function applyUserSession(user){
 
   // Update user badge
   const initials = user.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
-  document.getElementById('userAvatar').textContent  = initials;
+  document.getElementById('userAvatar').textContent    = initials;
   document.getElementById('userNameLabel').textContent = user.name + (user.role==='admin' ? ' · Admin' : '');
   document.getElementById('userFacilityLabel').textContent = user.facility !== 'All' ? '· ' + user.facility : '· All Facilities';
+  // Facility dropdown lock is applied in applyFacilityLock(), called after populateFilters()
+}
 
-  // Lock facility filter if not admin
+function applyFacilityLock(user){
   const facSel = document.getElementById('facilitySelect');
   if(user.facility !== 'All'){
-    // Set and disable the facility dropdown
+    // Find and select the matching option
+    let matched = false;
     for(let opt of facSel.options){
-      if(opt.value === user.facility){ opt.selected=true; break; }
+      if(opt.value === user.facility || opt.text === user.facility){
+        opt.selected = true;
+        matched = true;
+        break;
+      }
     }
     facSel.disabled = true;
     facSel.title    = 'Your access is limited to '+user.facility;
+    // Trigger filter so only their facility rows show
+    applyFilters();
   } else {
     facSel.disabled = false;
+    facSel.value    = '';
   }
 }
 
@@ -993,6 +1006,7 @@ function doLogout(){
   const facSel=document.getElementById('facilitySelect');
   facSel.disabled=false;
   facSel.value='';
+  facSel.title='';
   // Show login screen
   document.getElementById('loginOverlay').style.display='flex';
   document.getElementById('loginEmail').value='';
