@@ -183,6 +183,20 @@
   .bulk-btn-dq{background:var(--red);color:white;}
   .bulk-btn-clear{background:rgba(255,255,255,.15);color:white;}
   .bulk-btn-deselect{background:rgba(255,255,255,.08);color:rgba(255,255,255,.6);margin-left:auto;}
+
+  /* MISSED DATE TOGGLES */
+  .dates-cell { min-width: 280px; padding: 4px 8px; }
+  .dates-grid { display: flex; flex-wrap: wrap; gap: 3px; }
+  .date-btn {
+    font-size: 10px; font-family: var(--font); font-weight: 500;
+    padding: 2px 5px; border-radius: 3px; cursor: pointer;
+    border: 1px solid var(--gray-200); background: var(--gray-50);
+    color: var(--gray-600); transition: all .1s; line-height: 1.4;
+    white-space: nowrap;
+  }
+  .date-btn:hover { border-color: var(--red); color: var(--red); }
+  .date-btn.missed { background: var(--red-light); border-color: var(--red); color: var(--red); font-weight: 700; }
+  .missed-count { font-size: 10px; color: var(--red); font-weight: 700; margin-top: 2px; display: block; }
   /* Loading / empty states */
   .state-card{padding:48px;text-align:center;color:var(--gray-400);}
   .state-card h3{font-size:14px;color:var(--gray-600);margin-bottom:6px;}
@@ -495,6 +509,7 @@ function parseAndApplyRoster(csvText){
   const ddIdx   = headers.indexOf('Department_Desc');
   const titIdx  = headers.indexOf('Job_Title_LA_Desc');
   const statIdx = headers.indexOf('Employee_Status');
+  const dolIdx  = headers.indexOf('DOL_Status');
 
   if(codeIdx<0||nameIdx<0||facIdx<0){
     setRosterStatus('err','roster.csv missing required columns');
@@ -503,7 +518,7 @@ function parseAndApplyRoster(csvText){
     return;
   }
 
-  const saved = JSON.parse(localStorage.getItem('purehealth_shifts_v3')||'{}');
+  const saved = JSON.parse(localStorage.getItem('purehealth_shifts_v4')||'{}');
 
   roster = lines.slice(1).map(line=>{
     // Handle quoted fields with commas inside them
@@ -527,21 +542,31 @@ function parseAndApplyRoster(csvText){
       'pp activities',
       'activities director',
       'direct care nursing',
+      'culinary',
     ];
     if(EXCLUDED_DEPTS.some(ex => deptDescVal.includes(ex))) return null;
 
-    const facRaw = vals[facIdx]||'';
-    const shifts = saved[code]||{};
-    PAY_PERIODS.forEach(pp=>{ if(!shifts[pp.id]) shifts[pp.id]=''; });
+    const facRaw  = vals[facIdx]||'';
+    const dolStatus = dolIdx>=0 ? (vals[dolIdx]||'').trim() : '';
+    const isW2FullTime = dolStatus.toLowerCase() === 'full-time';
+    const shifts  = saved[code]||{};
+    // shifts[pp.id] is now an object: { dates:[], dq:bool }
+    PAY_PERIODS.forEach(pp=>{
+      if(!shifts[pp.id] || typeof shifts[pp.id] !== 'object'){
+        shifts[pp.id] = { dates:[], dq: false };
+      }
+    });
 
     return {
       code,
-      name:     vals[nameIdx]||'',
-      facility: FACILITY_MAP[facRaw]||facRaw,
+      name:        vals[nameIdx]||'',
+      facility:    FACILITY_MAP[facRaw]||facRaw,
       facilityRaw: facRaw,
-      dept:     vals[deptIdx]||'',
-      deptDesc: vals[ddIdx]||'',
-      title:    vals[titIdx]||'',
+      dept:        vals[deptIdx]||'',
+      deptDesc:    vals[ddIdx]||'',
+      title:       vals[titIdx]||'',
+      dolStatus,
+      isW2FullTime,
       shifts
     };
   }).filter(Boolean);
@@ -595,8 +620,8 @@ function applyFilters(){
     if(fac    && e.facility!==fac)  return false;
     if(dept   && e.deptDesc!==dept) return false;
     if(q && !e.name.toLowerCase().includes(q) && !e.code.toLowerCase().includes(q)) return false;
-    if(status==='dq' && e.shifts[ppId]!=='dq') return false;
-    if(status==='q'  && e.shifts[ppId]==='dq') return false;
+    if(status==='dq' && !isDQ(e,ppId)) return false;
+    if(status==='q'  &&  isDQ(e,ppId)) return false;
     return true;
   });
   renderTable();
@@ -607,16 +632,19 @@ function applyFilters(){
 // RENDER TABLE
 // ═══════════════════════════════════════════════════════
 function renderTable(){
-  const ppId = PAY_PERIODS[currentPPIdx].id;
+  const pp   = PAY_PERIODS[currentPPIdx];
+  const ppId = pp.id;
   const head = document.getElementById('tableHead');
   const body = document.getElementById('tableBody');
+  const periodDates = getPeriodDates(pp);
 
   head.innerHTML=`<tr>
     <th class="col-check"><input type="checkbox" class="select-all-cb" id="selectAllCb" onchange="toggleSelectAll(this)" title="Select all"></th>
     <th class="col-name">Employee</th>
     <th>Facility</th><th>Department</th>
-    <th class="period-cell">Period Status</th>
-    <th style="text-align:center">CareCoins</th>
+    <th class="dates-cell">Missed Dates <span style="font-weight:400;color:var(--gray-400)">(click to mark)</span></th>
+    <th style="text-align:center;min-width:90px">Status</th>
+    <th style="text-align:center;min-width:80px">CareCoins</th>
   </tr>`;
 
   if(!filteredRoster.length){
@@ -630,27 +658,35 @@ function renderTable(){
     `${filteredRoster.length} employee${filteredRoster.length!==1?'s':''}`;
 
   body.innerHTML=filteredRoster.map(emp=>{
-    const dq  = emp.shifts[ppId]==='dq';
-    const val = emp.shifts[ppId]||'';
+    const dq          = isDQ(emp, ppId);
+    const missedDates = getMissedDates(emp, ppId);
+    const dateBtns    = periodDates.map(d=>{
+      const isMissed = missedDates.includes(d.iso);
+      return `<button class="date-btn${isMissed?' missed':''}"
+        onclick="toggleDate('${emp.code}','${ppId}','${d.iso}',this)"
+        title="${d.label}">${d.label}</button>`;
+    }).join('');
+
     return `<tr class="${dq?'dq-row':''}" id="row-${emp.code}">
       <td class="col-check"><input type="checkbox" class="row-cb" data-code="${emp.code}" onchange="onRowCheck()" title="Select"></td>
       <td class="col-name">
         <div class="emp-name">${emp.name}</div>
         <div class="emp-code">${emp.code}</div>
+        ${emp.isW2FullTime ? '' : '<span style="font-size:9px;color:var(--amber);font-weight:600;">'+emp.dolStatus+'</span>'}
       </td>
       <td>${emp.facility}</td>
       <td><span class="dept-tag">${emp.dept}</span><div class="job-title">${emp.title}</div></td>
-      <td class="period-cell">
-        <select class="period-select ${val==='dq'?'dq':''}"
-          onchange="updateShift(this,'${emp.code}','${ppId}')">
-          <option value="" ${val===''?'selected':''}>— Clear —</option>
-          <option value="dq" ${val==='dq'?'selected':''}>Does not qualify</option>
-        </select>
+      <td class="dates-cell">
+        <div class="dates-grid">${dateBtns}</div>
+        ${missedDates.length>0 ? `<span class="missed-count">${missedDates.length} day${missedDates.length!==1?'s':''} missed</span>` : ''}
+      </td>
+      <td style="text-align:center" id="status-${emp.code}">
+        ${dq ? '<span class="pp-badge no">DQ</span>' : '<span class="pp-badge yes">OK</span>'}
       </td>
       <td style="text-align:center" id="coins-${emp.code}">
         ${dq
           ? '<span class="pp-badge no">DQ</span>'
-          : '<span class="pp-badge yes">Earns</span><span class="coins-earned">1,500 coins</span>'}
+          : (emp.isW2FullTime ? '<span class="pp-badge yes">Earns</span><span class="coins-earned">1,500 coins</span>' : '<span style="font-size:10px;color:var(--gray-400)">Not eligible</span>')}
       </td>
     </tr>`;
   }).join('');
@@ -659,17 +695,43 @@ function renderTable(){
 // ═══════════════════════════════════════════════════════
 // SHIFT UPDATE
 // ═══════════════════════════════════════════════════════
-function updateShift(el, code, ppId){
-  const val=el.value;
+function toggleDate(code, ppId, iso, btn){
   const emp=roster.find(e=>e.code===code);
   if(!emp) return;
-  emp.shifts[ppId]=val;
-  el.className='period-select '+(val==='dq'?'dq':'');
-  document.getElementById(`row-${code}`).className=val==='dq'?'dq-row':'';
+  if(typeof emp.shifts[ppId] !== 'object') emp.shifts[ppId]={dates:[],dq:false};
+
+  const dates = emp.shifts[ppId].dates;
+  const idx   = dates.indexOf(iso);
+  if(idx>=0){ dates.splice(idx,1); btn.classList.remove('missed'); }
+  else       { dates.push(iso);    btn.classList.add('missed'); }
+
+  // Auto-set DQ based on any missed date
+  emp.shifts[ppId].dq = dates.length > 0;
+
+  // Update missed count label
+  const cell = btn.closest('td');
+  let countEl = cell.querySelector('.missed-count');
+  if(dates.length > 0){
+    if(!countEl){ countEl=document.createElement('span'); countEl.className='missed-count'; cell.appendChild(countEl); }
+    countEl.textContent = dates.length+' day'+(dates.length!==1?'s':'')+' missed';
+  } else {
+    if(countEl) countEl.remove();
+  }
+
+  // Update row highlight
+  const dq = isDQ(emp, ppId);
+  document.getElementById(`row-${code}`).className = dq?'dq-row':'';
+
+  // Update status badge
+  const statusEl = document.getElementById(`status-${code}`);
+  if(statusEl) statusEl.innerHTML = dq?'<span class="pp-badge no">DQ</span>':'<span class="pp-badge yes">OK</span>';
+
+  // Update coins
   const coins=document.getElementById(`coins-${code}`);
-  if(coins) coins.innerHTML=val==='dq'
-    ?'<span class="pp-badge no">DQ</span>'
-    :'<span class="pp-badge yes">Earns</span><span class="coins-earned">1,500 coins</span>';
+  if(coins) coins.innerHTML = dq
+    ? '<span class="pp-badge no">DQ</span>'
+    : (emp.isW2FullTime ? '<span class="pp-badge yes">Earns</span><span class="coins-earned">1,500 coins</span>' : '<span style="font-size:10px;color:var(--gray-400)">Not eligible</span>');
+
   updateStats();
   autosave();
   setSyncStatus('idle');
@@ -677,7 +739,7 @@ function updateShift(el, code, ppId){
 
 function updateStats(){
   const ppId=PAY_PERIODS[currentPPIdx].id;
-  const dqCnt=roster.filter(e=>e.shifts[ppId]==='dq').length;
+  const dqCnt=roster.filter(e=>isDQ(e,ppId)).length;
   document.getElementById('statTotal').textContent  = roster.length;
   document.getElementById('statQ').textContent      = roster.length-dqCnt;
   document.getElementById('statDQ').textContent     = dqCnt;
@@ -710,7 +772,7 @@ function hideTableState(){
 function autosave(){
   const data={};
   roster.forEach(e=>{data[e.code]=e.shifts;});
-  localStorage.setItem('purehealth_shifts_v3',JSON.stringify(data));
+  localStorage.setItem('purehealth_shifts_v4',JSON.stringify(data));
 }
 
 // ═══════════════════════════════════════════════════════
@@ -750,11 +812,23 @@ async function saveToSheet(){
     timestamp:   new Date().toISOString(),
     employees: roster
       .filter(e => currentUser.facility === 'All' || e.facility === currentUser.facility)
-      .map(e=>({
-        code:e.code, name:e.name, facility:e.facility,
-        dept:e.deptDesc, title:e.title,
-        status:e.shifts[pp.id]||''
-      }))
+      .map(e=>{
+        const s = e.shifts[pp.id]||{};
+        const missedDates = (s.dates||[]).join(', ');
+        const dq = isDQ(e, pp.id);
+        return {
+          code:     e.code,
+          name:     e.name,
+          facility: e.facility,
+          dept:     e.deptDesc,
+          title:    e.title,
+          dolStatus:    e.dolStatus||'',
+          isW2FullTime: e.isW2FullTime||false,
+          missedDates,
+          missedCount:  (s.dates||[]).length,
+          status:   dq ? 'Does not qualify' : 'Qualifying'
+        };
+      })
   };
 
   setSyncStatus('syncing');
@@ -802,7 +876,7 @@ function setSyncStatus(state){
 // ═══════════════════════════════════════════════════════
 function exportDQ(){
   const pp=PAY_PERIODS[currentPPIdx], ppId=pp.id;
-  const dqList=roster.filter(e=>e.shifts[ppId]==='dq');
+  const dqList=roster.filter(e=>isDQ(e,ppId));
   if(!dqList.length){showToast('No disqualified employees for this pay period');return;}
   const headers=['Employee_Code','Employee_Name','Facility','Department','Job_Title',
                  'Pay_Date','Period_Start','Period_End','Status','CareCoins'];
@@ -827,6 +901,39 @@ function showToast(msg,isError){
   t.className='toast'+(isError?' error':'');
   t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'),3500);
+}
+
+// ═══════════════════════════════════════════════════════
+// PAY PERIOD DATE HELPERS
+// ═══════════════════════════════════════════════════════
+function getPeriodDates(pp){
+  // Returns array of {label:'Aug 16', iso:'2026-08-16'} for each day in period
+  const dates = [];
+  const MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const [sm,sd,sy] = pp.start.split('/').map(Number);
+  const [em,ed,ey] = pp.end.split('/').map(Number);
+  let cur = new Date(sy, sm-1, sd);
+  const end = new Date(ey, em-1, ed);
+  while(cur <= end){
+    dates.push({
+      label: MO[cur.getMonth()]+' '+cur.getDate(),
+      iso:   cur.getFullYear()+'-'+String(cur.getMonth()+1).padStart(2,'0')+'-'+String(cur.getDate()).padStart(2,'0')
+    });
+    cur.setDate(cur.getDate()+1);
+  }
+  return dates;
+}
+
+function isDQ(emp, ppId){
+  const s = emp.shifts[ppId];
+  if(!s || typeof s !== 'object') return false;
+  return s.dq === true || (s.dates && s.dates.length > 0);
+}
+
+function getMissedDates(emp, ppId){
+  const s = emp.shifts[ppId];
+  if(!s || typeof s !== 'object') return [];
+  return s.dates || [];
 }
 
 // ═══════════════════════════════════════════════════════
@@ -873,22 +980,35 @@ function bulkMark(val){
   codes.forEach(code=>{
     const emp=roster.find(e=>e.code===code);
     if(!emp) return;
-    emp.shifts[ppId]=val;
+    if(typeof emp.shifts[ppId] !== 'object') emp.shifts[ppId]={dates:[],dq:false};
 
-    // Update the select dropdown for this row
+    if(val==='dq'){
+      emp.shifts[ppId].dq=true;
+    } else {
+      // Clear — remove all missed dates and DQ flag
+      emp.shifts[ppId].dates=[];
+      emp.shifts[ppId].dq=false;
+    }
+
     const row=document.getElementById(`row-${code}`);
     if(!row) return;
-    const sel=row.querySelector('.period-select');
-    if(sel){ sel.value=val; sel.className='period-select '+(val==='dq'?'dq':''); }
+    const dq=isDQ(emp,ppId);
+    row.className = dq?'dq-row':'';
 
-    // Update row highlight
-    row.className = val==='dq'?'dq-row':'';
+    const statusEl=document.getElementById(`status-${code}`);
+    if(statusEl) statusEl.innerHTML=dq?'<span class="pp-badge no">DQ</span>':'<span class="pp-badge yes">OK</span>';
 
-    // Update coins cell
     const coins=document.getElementById(`coins-${code}`);
-    if(coins) coins.innerHTML = val==='dq'
+    if(coins) coins.innerHTML = dq
       ? '<span class="pp-badge no">DQ</span>'
-      : '<span class="pp-badge yes">Earns</span><span class="coins-earned">1,500 coins</span>';
+      : (emp.isW2FullTime?'<span class="pp-badge yes">Earns</span><span class="coins-earned">1,500 coins</span>':'<span style="font-size:10px;color:var(--gray-400)">Not eligible</span>');
+
+    // Clear date buttons visually
+    if(!dq){
+      row.querySelectorAll('.date-btn').forEach(b=>b.classList.remove('missed'));
+      const countEl=row.querySelector('.missed-count');
+      if(countEl) countEl.remove();
+    }
   });
 
   updateStats();
