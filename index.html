@@ -357,7 +357,7 @@
 const ROSTER_URL =
   'https://raw.githubusercontent.com/MCOAJoyceMartin/MissedShiftsTracker/main/roster.csv';
 const CREDS_URL =
-  'https://raw.githubusercontent.com/MCOAJoyceMartin/MissedShiftsTracker/main/credentials.csv';
+  'https://raw.githubusercontent.com/MCOAJoyceMartin/yourpureai-portal/main/portal_credentials.csv';
 
 // Cloudflare Worker URL — hardcoded, no prompt needed
 const WORKER_URL = 'https://missed-shifts-tracker.joyce-969.workers.dev';
@@ -1070,12 +1070,13 @@ function validateCredentials(csvText, email, password){
 
   for(let i=1;i<lines.length;i++){
     const vals = lines[i].split(',').map(v=>v.trim().replace(/^"|"$/g,''));
+    if(!(vals[eIdx]||'').trim()) continue; // skip blank rows
     if((vals[eIdx]||'').toLowerCase()===email && (vals[pIdx]||'')=== password){
       return {
         email:    vals[eIdx],
         name:     vals[nIdx]||email,
         facility: vals[fIdx]||'All',
-        role:     vals[rIdx]||'hrd'
+        role:     (vals[rIdx]||'hrd').toLowerCase()
       };
     }
   }
@@ -1096,23 +1097,31 @@ function applyUserSession(user){
 
 function applyFacilityLock(user){
   const facSel = document.getElementById('facilitySelect');
-  if(user.facility !== 'All'){
-    // Find and select the matching option
-    let matched = false;
+  if(user.facility === 'All'){
+    facSel.disabled = false;
+    facSel.value    = '';
+  } else if(user.facility === 'Multi' && user.facilities && user.facilities.length > 1){
+    // Multiple specific facilities — filter options to only show allowed ones
+    // Keep 'All Facilities' option plus their assigned ones
+    for(let opt of facSel.options){
+      if(opt.value !== '' && !user.facilities.includes(opt.value) && !user.facilities.includes(opt.text)){
+        opt.style.display = 'none';
+      }
+    }
+    facSel.disabled = false;
+    facSel.title    = 'Access limited to: '+user.facilities.join(', ');
+    applyFilters();
+  } else {
+    // Single facility
     for(let opt of facSel.options){
       if(opt.value === user.facility || opt.text === user.facility){
         opt.selected = true;
-        matched = true;
         break;
       }
     }
     facSel.disabled = true;
     facSel.title    = 'Your access is limited to '+user.facility;
-    // Trigger filter so only their facility rows show
     applyFilters();
-  } else {
-    facSel.disabled = false;
-    facSel.value    = '';
   }
 }
 
@@ -1157,8 +1166,24 @@ function checkExistingSession(){
 // ═══════════════════════════════════════════════════════
 buildPPNav();
 updateHero();
+// Check portal session first (single sign-on from yourpureai.com)
+function checkPortalSession(){
+  const portal = sessionStorage.getItem('purehealth_portal_session');
+  if(portal){
+    try{
+      const u = JSON.parse(portal);
+      // Map portal session to tracker session format
+      currentUser = { email:u.email, name:u.name, facility:u.facility||'All', role:u.role||'hrd' };
+      document.getElementById('loginOverlay').style.display='none';
+      applyUserSession(currentUser);
+      return true;
+    }catch(e){}
+  }
+  return false;
+}
+
 // Check for existing session — if none, show login screen and wait
-if(!checkExistingSession()){
+if(!checkExistingSession() && !checkPortalSession()){
   // Login overlay is already visible by default; roster loads after login
 } else {
   loadRoster();
