@@ -510,6 +510,7 @@ function parseAndApplyRoster(csvText){
   const titIdx  = headers.indexOf('Job_Title_LA_Desc');
   const statIdx = headers.indexOf('Employee_Status');
   const dolIdx  = headers.indexOf('DOL_Status');
+  const payIdx  = headers.indexOf('Pay_Type');
 
   if(codeIdx<0||nameIdx<0||facIdx<0){
     setRosterStatus('err','roster.csv missing required columns');
@@ -529,6 +530,10 @@ function parseAndApplyRoster(csvText){
     // Only include Active employees — skip everyone else (Terminated, LOA, Inactive, etc.)
     if(statIdx>=0 && (vals[statIdx]||'').trim().toLowerCase() !== 'active') return null;
 
+    // Skip salaried employees — the CareCoins incentive is for hourly/W2 staff only.
+    // Optional column: if roster.csv doesn't have Pay_Type, nobody gets excluded by it.
+    if(payIdx>=0 && (vals[payIdx]||'').trim().toLowerCase() === 'salary') return null;
+
     // Skip excluded departments — these are not eligible for the CareCoins incentive
     const deptDescVal = (vals[ddIdx]||'').trim().toLowerCase();
     const EXCLUDED_DEPTS = [
@@ -536,7 +541,6 @@ function parseAndApplyRoster(csvText){
       'case management',
       'central supply',
       'clinical administration',
-      'engineering/plant operations',
       'environmental services',
       'medical records',
       'pp activities',
@@ -1091,7 +1095,9 @@ function applyUserSession(user){
   // Update user badge
   const initials = user.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
   document.getElementById('userAvatar').textContent    = initials;
-  const isAdmin = ((user.card||user.role||'')+'').toLowerCase()==='admin';
+  // Card/Role can list more than one value (e.g. "REHAB; HR") — check
+  // whether 'admin' is among them rather than requiring an exact match.
+  const isAdmin = ((user.card||user.role||'')+'').split(/[;,]/).map(r=>r.trim().toLowerCase()).includes('admin');
   document.getElementById('userNameLabel').textContent = user.name + (isAdmin ? ' · Admin' : '');
 
   const facScope  = normalizeScope(user.facility, user.facilities);
@@ -1147,6 +1153,25 @@ function showLoginError(msg){
   el.classList.add('visible');
 }
 
+// Cards allowed into this app — mirrors CARD_APP_MAP['missed_shifts'] on the
+// portal (yourpureai.com's index page). The portal already hides the Missed
+// Shifts card from anyone whose card isn't in that list, but a hidden link
+// isn't an access control by itself — a bookmarked/shared/reused `phs` token
+// (or a portal session already sitting in this browser) would otherwise still
+// get a Finance- or Rehab-only person straight into shift data with no
+// facility/department restriction at all (their CSV row leaves those columns
+// blank for their real card, which normalizeScope() reads as unrestricted).
+// This check is the actual gate; keep it in sync with the portal's map.
+const MISSED_SHIFTS_ALLOWED_CARDS = ['admin','hr'];
+// A person's Card/Role cell can list more than one value (e.g. "REHAB; HR"
+// for someone who needs both a Rehab app and Missed Shifts) — check whether
+// any listed role grants access, rather than requiring an exact match on
+// the whole cell.
+function hasMissedShiftsAccess(user){
+  const roles = (((user && user.card)||'')+'').split(/[;,]/).map(r=>r.trim().toLowerCase()).filter(Boolean);
+  return roles.some(r => MISSED_SHIFTS_ALLOWED_CARDS.includes(r));
+}
+
 function doLogout(){
   currentUser=null;
   sessionStorage.removeItem('purehealth_session');
@@ -1160,7 +1185,13 @@ function checkExistingSession(){
   const saved = sessionStorage.getItem('purehealth_session');
   if(saved){
     try{
-      currentUser = JSON.parse(saved);
+      const u = JSON.parse(saved);
+      if(!hasMissedShiftsAccess(u)){
+        sessionStorage.removeItem('purehealth_session');
+        showLoginError('Your account doesn\'t have access to Missed Shifts. Please sign in at the portal.');
+        return false;
+      }
+      currentUser = u;
       document.getElementById('loginOverlay').style.display='none';
       applyUserSession(currentUser);
       return true;
@@ -1182,7 +1213,13 @@ function checkPortalSession(){
     try{
       const u = JSON.parse(portal);
       // Map portal session to tracker session format
-      currentUser = { email:u.email, name:u.name, facility:normalizeScope(u.facility, u.facilities), department:normalizeScope(u.department), card:u.card||u.role||'' };
+      const mapped = { email:u.email, name:u.name, facility:normalizeScope(u.facility, u.facilities), department:normalizeScope(u.department), card:u.card||u.role||'' };
+      if(!hasMissedShiftsAccess(mapped)){
+        sessionStorage.removeItem('purehealth_portal_session');
+        showLoginError('Your account doesn\'t have access to Missed Shifts. Please sign in at the portal.');
+        return false;
+      }
+      currentUser = mapped;
       document.getElementById('loginOverlay').style.display='none';
       applyUserSession(currentUser);
       return true;
@@ -1219,7 +1256,12 @@ function checkURLSession(){
       return false;
     }
 
-    currentUser = { email:u.email, name:u.name||u.email, facility:normalizeScope(u.facility, u.facilities), department:normalizeScope(u.department), card:u.card||u.role||'' };
+    const mapped = { email:u.email, name:u.name||u.email, facility:normalizeScope(u.facility, u.facilities), department:normalizeScope(u.department), card:u.card||u.role||'' };
+    if(!hasMissedShiftsAccess(mapped)){
+      showLoginError('Your account doesn\'t have access to Missed Shifts. Please sign in at the portal.');
+      return false;
+    }
+    currentUser = mapped;
     sessionStorage.setItem('purehealth_portal_session', JSON.stringify(currentUser));
     document.getElementById('loginOverlay').style.display='none';
     applyUserSession(currentUser);
