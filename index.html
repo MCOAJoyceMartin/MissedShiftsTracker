@@ -326,17 +326,15 @@
       </div>
     </div>
     <div class="login-error" id="loginError"></div>
-    <div class="login-field">
-      <label>Email Address</label>
-      <input type="email" class="login-input" id="loginEmail" placeholder="you@purehlth.com" autocomplete="email">
-    </div>
-    <div class="login-field">
-      <label>Password</label>
-      <input type="password" class="login-input" id="loginPassword" placeholder="Enter your password"
-        autocomplete="current-password" onkeydown="if(event.key==='Enter') doLogin()">
-    </div>
-    <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign In</button>
-    <div class="login-loading" id="loginLoading">Verifying credentials…</div>
+    <p style="font-size:13px;color:var(--gray-600);line-height:1.6;margin-bottom:18px;">
+      This tool is opened from the PureHealth Operations Platform — your access
+      (which facility and department you can see) is set up there, so sign in
+      at the portal rather than here.
+    </p>
+    <a class="login-btn" id="portalSigninBtn" href="https://www.yourpureai.com/"
+       style="display:block;text-align:center;text-decoration:none;box-sizing:border-box;">
+      Sign in at the Portal →
+    </a>
   </div>
 </div>
 
@@ -356,8 +354,10 @@
 // ═══════════════════════════════════════════════════════
 const ROSTER_URL =
   'https://raw.githubusercontent.com/MCOAJoyceMartin/MissedShiftsTracker/main/roster.csv';
-const CREDS_URL =
-  'https://raw.githubusercontent.com/MCOAJoyceMartin/yourpureai-portal/main/portal_credentials.csv';
+// No CREDS_URL / standalone credential check here anymore — sign-in happens
+// once, at the portal (yourpureai.com), which hands off the session via the
+// `phs` URL token (see checkURLSession() below). See PORTAL_URL below.
+const PORTAL_URL = 'https://www.yourpureai.com/';
 
 // Cloudflare Worker URL — hardcoded, no prompt needed
 const WORKER_URL = 'https://missed-shifts-tracker.joyce-969.workers.dev';
@@ -604,8 +604,11 @@ function populateFilters(){
   document.getElementById('deptSelect').innerHTML =
     '<option value="">All Departments</option>'+depts.map(d=>`<option>${d}</option>`).join('');
 
-  // Re-apply facility lock now that options exist
-  if(currentUser) applyFacilityLock(currentUser);
+  // Re-apply facility/department lock now that options exist
+  if(currentUser){
+    applyFacilityLock(currentUser);
+    applyDepartmentLock(currentUser);
+  }
 }
 
 function applyFilters(){
@@ -616,7 +619,17 @@ function applyFilters(){
   const q      = document.getElementById('searchBox').value.trim().toLowerCase();
   const ppId   = PAY_PERIODS[currentPPIdx].id;
 
+  // Hard data-level enforcement of the signed-in user's facility/department
+  // scope — independent of whatever the dropdowns happen to show. This
+  // matters for a multi-facility user (dropdown left on "All" among just
+  // their assigned options): without this, "All" would still mean every
+  // facility in the roster, not just the ones they're allowed to see.
+  const facScope  = currentUser ? normalizeScope(currentUser.facility, currentUser.facilities) : ['All'];
+  const deptScope = currentUser ? normalizeScope(currentUser.department) : ['All'];
+
   filteredRoster = roster.filter(e=>{
+    if(!facScope.includes('All')  && !facScope.includes(e.facility))  return false;
+    if(!deptScope.includes('All') && !deptScope.includes(e.deptDesc)) return false;
     if(fac    && e.facility!==fac)  return false;
     if(dept   && e.deptDesc!==dept) return false;
     if(q && !e.name.toLowerCase().includes(q) && !e.code.toLowerCase().includes(q)) return false;
@@ -739,9 +752,18 @@ function toggleDate(code, ppId, iso, btn){
 
 function updateStats(){
   const ppId=PAY_PERIODS[currentPPIdx].id;
-  const dqCnt=roster.filter(e=>isDQ(e,ppId)).length;
-  document.getElementById('statTotal').textContent  = roster.length;
-  document.getElementById('statQ').textContent      = roster.length-dqCnt;
+  // Company-wide totals would leak headcount/DQ info about facilities or
+  // departments a scoped user isn't allowed to see — so these stats are
+  // computed against the user's scope, not the full roster.
+  const facScope  = currentUser ? normalizeScope(currentUser.facility, currentUser.facilities) : ['All'];
+  const deptScope = currentUser ? normalizeScope(currentUser.department) : ['All'];
+  const scopedRoster = roster.filter(e =>
+    (facScope.includes('All')  || facScope.includes(e.facility)) &&
+    (deptScope.includes('All') || deptScope.includes(e.deptDesc))
+  );
+  const dqCnt=scopedRoster.filter(e=>isDQ(e,ppId)).length;
+  document.getElementById('statTotal').textContent  = scopedRoster.length;
+  document.getElementById('statQ').textContent      = scopedRoster.length-dqCnt;
   document.getElementById('statDQ').textContent     = dqCnt;
   document.getElementById('statShown').textContent  = filteredRoster.length;
 }
@@ -811,7 +833,12 @@ async function saveToSheet(){
     savedBy,
     timestamp:   new Date().toISOString(),
     employees: roster
-      .filter(e => currentUser.facility === 'All' || e.facility === currentUser.facility)
+      .filter(e => {
+        const facScope  = currentUser ? normalizeScope(currentUser.facility, currentUser.facilities) : ['All'];
+        const deptScope = currentUser ? normalizeScope(currentUser.department) : ['All'];
+        return (facScope.includes('All')  || facScope.includes(e.facility)) &&
+               (deptScope.includes('All') || deptScope.includes(e.deptDesc));
+      })
       .map(e=>{
         const s = e.shifts[pp.id]||{};
         const missedDates = (s.dates||[]).join(', ');
@@ -876,7 +903,16 @@ function setSyncStatus(state){
 // ═══════════════════════════════════════════════════════
 function exportDQ(){
   const pp=PAY_PERIODS[currentPPIdx], ppId=pp.id;
-  const dqList=roster.filter(e=>isDQ(e,ppId));
+  // Scope the export the same way the table itself is scoped — otherwise a
+  // facility/department-locked user could export disqualified employees
+  // company-wide via this button even though their on-screen view is locked.
+  const facScope  = currentUser ? normalizeScope(currentUser.facility, currentUser.facilities) : ['All'];
+  const deptScope = currentUser ? normalizeScope(currentUser.department) : ['All'];
+  const dqList=roster.filter(e =>
+    isDQ(e,ppId) &&
+    (facScope.includes('All')  || facScope.includes(e.facility)) &&
+    (deptScope.includes('All') || deptScope.includes(e.deptDesc))
+  );
   if(!dqList.length){showToast('No disqualified employees for this pay period');return;}
   const headers=['Employee_Code','Employee_Name','Facility','Department','Job_Title',
                  'Pay_Date','Period_Start','Period_End','Status','CareCoins'];
@@ -1019,68 +1055,33 @@ function bulkMark(val){
 }
 
 // ═══════════════════════════════════════════════════════
-// AUTHENTICATION
+// AUTHENTICATION — sign-in happens once, at the portal (yourpureai.com).
+// This page never collects a password itself; see checkURLSession() below
+// for how a signed-in portal session is handed off, and the login-overlay
+// markup above for what shows if someone lands here without one.
 // ═══════════════════════════════════════════════════════
-async function doLogin(){
-  const email    = document.getElementById('loginEmail').value.trim().toLowerCase();
-  const password = document.getElementById('loginPassword').value;
-  const errEl    = document.getElementById('loginError');
-  const loadEl   = document.getElementById('loginLoading');
-  const btn      = document.getElementById('loginBtn');
 
-  errEl.classList.remove('visible');
-  if(!email || !password){ showLoginError('Please enter your email and password.'); return; }
-
-  btn.disabled=true;
-  loadEl.classList.add('visible');
-
-  try {
-    const res  = await fetch(CREDS_URL+'?t='+Date.now());
-    if(!res.ok) throw new Error('Could not load credentials (HTTP '+res.status+')');
-    const text = await res.text();
-    const user = validateCredentials(text, email, password);
-
-    if(!user){
-      showLoginError('Incorrect email or password. Please try again.');
-      btn.disabled=false; loadEl.classList.remove('visible');
-      return;
-    }
-
-    // Successful login
-    currentUser = user;
-    sessionStorage.setItem('purehealth_session', JSON.stringify(user));
-    document.getElementById('loginOverlay').style.display='none';
-    applyUserSession(user);
-    loadRoster();
-
-  } catch(err){
-    showLoginError('Login error: '+err.message);
-    btn.disabled=false; loadEl.classList.remove('visible');
-  }
+// A blank cell, or the literal word "All", means unrestricted. Otherwise
+// split on ';' for people with more than one allowed facility/department
+// (e.g. "Las Estancias;Manzano;Princeton"), trimming each piece. (Used when
+// normalizing a facility/department value that arrives as a raw string —
+// e.g. from an older cached session — rather than already-parsed arrays.)
+function parseScope(raw){
+  const trimmed = (raw||'').trim();
+  if(!trimmed || trimmed.toLowerCase()==='all') return ['All'];
+  return trimmed.split(';').map(s=>s.trim()).filter(Boolean);
 }
 
-function validateCredentials(csvText, email, password){
-  const lines = csvText.trim().split('\n').filter(Boolean);
-  const hdrs  = lines[0].split(',').map(h=>h.trim().replace(/^"|"$/g,'').toLowerCase());
-  const eIdx  = hdrs.indexOf('email');
-  const pIdx  = hdrs.indexOf('password');
-  const nIdx  = hdrs.indexOf('name');
-  const fIdx  = hdrs.indexOf('facility');
-  const rIdx  = hdrs.indexOf('role');
-
-  for(let i=1;i<lines.length;i++){
-    const vals = lines[i].split(',').map(v=>v.trim().replace(/^"|"$/g,''));
-    if(!(vals[eIdx]||'').trim()) continue; // skip blank rows
-    if((vals[eIdx]||'').toLowerCase()===email && (vals[pIdx]||'')=== password){
-      return {
-        email:    vals[eIdx],
-        name:     vals[nIdx]||email,
-        facility: vals[fIdx]||'All',
-        role:     (vals[rIdx]||'hrd').toLowerCase()
-      };
-    }
-  }
-  return null;
+// Normalizes older/looser shapes (a plain string, the legacy 'Multi' +
+// facilities[] pair, or undefined) into the ['All'] | [one-or-more] array
+// shape parseScope() produces, so every caller can treat facility/department
+// the same way regardless of where the user object came from (fresh CSV
+// login, sessionStorage, or the cross-domain SSO token).
+function normalizeScope(val, legacyList){
+  if(Array.isArray(val)) return val.length ? val : ['All'];
+  if(val === 'Multi' && Array.isArray(legacyList) && legacyList.length) return legacyList;
+  if(!val || val === 'All') return ['All'];
+  return [val];
 }
 
 function applyUserSession(user){
@@ -1090,39 +1091,54 @@ function applyUserSession(user){
   // Update user badge
   const initials = user.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
   document.getElementById('userAvatar').textContent    = initials;
-  document.getElementById('userNameLabel').textContent = user.name + (user.role==='admin' ? ' · Admin' : '');
-  document.getElementById('userFacilityLabel').textContent = user.facility !== 'All' ? '· ' + user.facility : '· All Facilities';
-  // Facility dropdown lock is applied in applyFacilityLock(), called after populateFilters()
+  const isAdmin = ((user.card||user.role||'')+'').toLowerCase()==='admin';
+  document.getElementById('userNameLabel').textContent = user.name + (isAdmin ? ' · Admin' : '');
+
+  const facScope  = normalizeScope(user.facility, user.facilities);
+  const deptScope = normalizeScope(user.department);
+  const scopeParts = [];
+  if(!facScope.includes('All'))  scopeParts.push(facScope.join(', '));
+  if(!deptScope.includes('All')) scopeParts.push(deptScope.join(', '));
+  document.getElementById('userFacilityLabel').textContent =
+    scopeParts.length ? '· ' + scopeParts.join(' · ') : '· All Facilities';
+  // Facility/department dropdown locks are applied in applyFacilityLock()/
+  // applyDepartmentLock(), called after populateFilters()
+}
+
+// Shared by applyFacilityLock/applyDepartmentLock: locks `selectEl` down to
+// `scope` (an array from parseScope/normalizeScope). ['All'] leaves it open;
+// one value hard-locks it; more than one hides every other option but still
+// lets the person switch among their assigned set.
+function applyScopeLock(selectEl, scope, label){
+  if(scope.includes('All')){
+    selectEl.disabled = false;
+    for(let opt of selectEl.options) opt.style.display = '';
+    return;
+  }
+  for(let opt of selectEl.options){
+    if(opt.value !== '' && !scope.includes(opt.value) && !scope.includes(opt.text)){
+      opt.style.display = 'none';
+    }
+  }
+  if(scope.length === 1){
+    for(let opt of selectEl.options){
+      if(opt.value === scope[0] || opt.text === scope[0]){ opt.selected = true; break; }
+    }
+    selectEl.disabled = true;
+    selectEl.title     = 'Your access is limited to '+scope[0];
+  } else {
+    selectEl.disabled = false;
+    selectEl.title     = 'Access limited to: '+scope.join(', ');
+  }
+  applyFilters();
 }
 
 function applyFacilityLock(user){
-  const facSel = document.getElementById('facilitySelect');
-  if(user.facility === 'All'){
-    facSel.disabled = false;
-    facSel.value    = '';
-  } else if(user.facility === 'Multi' && user.facilities && user.facilities.length > 1){
-    // Multiple specific facilities — filter options to only show allowed ones
-    // Keep 'All Facilities' option plus their assigned ones
-    for(let opt of facSel.options){
-      if(opt.value !== '' && !user.facilities.includes(opt.value) && !user.facilities.includes(opt.text)){
-        opt.style.display = 'none';
-      }
-    }
-    facSel.disabled = false;
-    facSel.title    = 'Access limited to: '+user.facilities.join(', ');
-    applyFilters();
-  } else {
-    // Single facility
-    for(let opt of facSel.options){
-      if(opt.value === user.facility || opt.text === user.facility){
-        opt.selected = true;
-        break;
-      }
-    }
-    facSel.disabled = true;
-    facSel.title    = 'Your access is limited to '+user.facility;
-    applyFilters();
-  }
+  applyScopeLock(document.getElementById('facilitySelect'), normalizeScope(user.facility, user.facilities), 'facility');
+}
+
+function applyDepartmentLock(user){
+  applyScopeLock(document.getElementById('deptSelect'), normalizeScope(user.department), 'department');
 }
 
 function showLoginError(msg){
@@ -1134,18 +1150,10 @@ function showLoginError(msg){
 function doLogout(){
   currentUser=null;
   sessionStorage.removeItem('purehealth_session');
-  // Reset facility filter
-  const facSel=document.getElementById('facilitySelect');
-  facSel.disabled=false;
-  facSel.value='';
-  facSel.title='';
-  // Show login screen
-  document.getElementById('loginOverlay').style.display='flex';
-  document.getElementById('loginEmail').value='';
-  document.getElementById('loginPassword').value='';
-  document.getElementById('loginError').classList.remove('visible');
-  document.getElementById('loginLoading').classList.remove('visible');
-  document.getElementById('loginBtn').disabled=false;
+  sessionStorage.removeItem('purehealth_portal_session');
+  // Sign-in lives at the portal, not here — send them back to it rather
+  // than showing a local form.
+  window.location.href = PORTAL_URL;
 }
 
 function checkExistingSession(){
@@ -1166,14 +1174,15 @@ function checkExistingSession(){
 // ═══════════════════════════════════════════════════════
 buildPPNav();
 updateHero();
-// Check portal session first (single sign-on from yourpureai.com)
+// Check portal session first (single sign-on from yourpureai.com, same-tab/
+// same-origin case — works when this page is opened at yourpureai.com itself)
 function checkPortalSession(){
   const portal = sessionStorage.getItem('purehealth_portal_session');
   if(portal){
     try{
       const u = JSON.parse(portal);
       // Map portal session to tracker session format
-      currentUser = { email:u.email, name:u.name, facility:u.facility||'All', role:u.role||'hrd' };
+      currentUser = { email:u.email, name:u.name, facility:normalizeScope(u.facility, u.facilities), department:normalizeScope(u.department), card:u.card||u.role||'' };
       document.getElementById('loginOverlay').style.display='none';
       applyUserSession(currentUser);
       return true;
@@ -1182,8 +1191,47 @@ function checkPortalSession(){
   return false;
 }
 
+// Check for a portal session handed off via URL (single sign-on across
+// domains — this tracker is hosted on GitHub Pages, a different origin from
+// yourpureai.com, so sessionStorage set on the portal can't be read here
+// directly; the portal instead encodes the logged-in user into a `phs` URL
+// parameter when it links here). Only trusts the token if the email domain
+// matches the same restriction the portal itself enforces.
+const SSO_ALLOWED_DOMAINS = ['mcoa.health', 'purehlth.com'];
+function checkURLSession(){
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('phs');
+  if(!token) return false;
+
+  // Strip the token from the visible URL/history right away, whether it
+  // turns out valid or not — it should never sit there or get bookmarked.
+  const cleanUrl = window.location.pathname + window.location.hash;
+  window.history.replaceState({}, document.title, cleanUrl);
+
+  try{
+    // URLSearchParams.get() already percent-decodes the value, so `token`
+    // here is the raw base64 string — just base64-decode then UTF-8 decode.
+    const json = decodeURIComponent(escape(atob(token)));
+    const u = JSON.parse(json);
+    const domain = (u.email||'').split('@')[1] || '';
+    if(!u.email || !SSO_ALLOWED_DOMAINS.includes(domain.toLowerCase())){
+      showLoginError('That sign-in link isn\'t valid. Please sign in again at the portal.');
+      return false;
+    }
+
+    currentUser = { email:u.email, name:u.name||u.email, facility:normalizeScope(u.facility, u.facilities), department:normalizeScope(u.department), card:u.card||u.role||'' };
+    sessionStorage.setItem('purehealth_portal_session', JSON.stringify(currentUser));
+    document.getElementById('loginOverlay').style.display='none';
+    applyUserSession(currentUser);
+    return true;
+  }catch(e){
+    showLoginError('That sign-in link couldn\'t be read. Please sign in again at the portal.');
+    return false;
+  }
+}
+
 // Check for existing session — if none, show login screen and wait
-if(!checkExistingSession() && !checkPortalSession()){
+if(!checkExistingSession() && !checkPortalSession() && !checkURLSession()){
   // Login overlay is already visible by default; roster loads after login
 } else {
   loadRoster();
