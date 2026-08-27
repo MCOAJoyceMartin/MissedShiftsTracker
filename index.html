@@ -128,6 +128,38 @@
 
 
 
+  /* LOGIN SCREEN */
+  .login-overlay{position:fixed;inset:0;background:var(--navy);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .login-box{background:white;border-radius:10px;padding:36px 32px;max-width:400px;width:100%;box-shadow:0 8px 40px rgba(0,0,0,.3);}
+  .login-logo{display:flex;align-items:center;gap:10px;margin-bottom:24px;}
+  .login-logo img{height:44px;width:auto;}
+  .login-title{font-size:18px;font-weight:700;color:var(--navy);}
+  .login-sub{font-size:12px;color:var(--gray-400);margin-top:2px;}
+  .login-field{margin-bottom:14px;}
+  .login-field label{display:block;font-size:11px;font-weight:700;color:var(--gray-600);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;}
+  .login-input{width:100%;border:1px solid var(--gray-200);border-radius:var(--radius);padding:9px 12px;font-size:13px;font-family:var(--font);outline:none;transition:border-color .15s;background:var(--gray-50);}
+  .login-input:focus{border-color:var(--teal);background:white;}
+  .login-btn{width:100%;background:var(--teal);color:white;border:none;border-radius:var(--radius);padding:10px;font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font);margin-top:4px;transition:opacity .15s;}
+  .login-btn:hover{opacity:.88;}
+  .login-btn:disabled{opacity:.5;cursor:default;}
+  .login-error{background:var(--red-light);border:1px solid var(--red);color:var(--red);border-radius:var(--radius);padding:8px 12px;font-size:12px;margin-bottom:12px;display:none;}
+  .login-error.visible{display:block;}
+  .login-loading{text-align:center;font-size:12px;color:var(--gray-400);margin-top:8px;display:none;}
+  .login-loading.visible{display:block;}
+
+  /* USER BADGE in roster bar */
+  .user-badge{display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,.7);}
+  .user-avatar{width:22px;height:22px;border-radius:50%;background:var(--teal);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:white;flex-shrink:0;}
+  .logout-btn{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:4px;color:rgba(255,255,255,.6);font-size:10px;padding:2px 7px;cursor:pointer;font-family:var(--font);margin-left:4px;}
+  .logout-btn:hover{background:rgba(255,255,255,.2);}
+  /* CHECKBOX column */
+  .col-check{position:sticky;left:0;background:inherit;z-index:6;width:36px;min-width:36px;text-align:center;padding:6px 4px;}
+  thead .col-check{background:var(--gray-50);}
+  tbody tr:hover .col-check{background:var(--gray-50);}
+  tbody tr.dq-row .col-check{background:#FFF8F7;}
+  tbody tr.dq-row:hover .col-check{background:#FFF1EE;}
+  .row-cb, .select-all-cb{width:15px;height:15px;cursor:pointer;accent-color:var(--teal);}
+
   /* BULK ACTION BAR */
   .bulk-bar{
     display:none;
